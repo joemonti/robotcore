@@ -58,8 +58,10 @@ class RCoreEventTypeBuilder(object):
 
 class RCoreEventType(object):
     '''RobotCore Message Type'''
-    def __init__(self, name, dataTypes):
+    def __init__(self, name, dataTypes, id=None, lock=None):
         self.name = name
+        self.id = id
+        self.lock = lock
         self.count = len(dataTypes)
         self.dataTypes = dataTypes
 
@@ -97,4 +99,10 @@ class RCoreEvent(object):
         self.eventType = eventType
         self.data = data
         self.index = 0
+    
+    def serialize(self):
+        buffer = bytearray()
+        buffer.pack_into('>h', self.eventType.id)
+        buffer.extend(data)
+        return buffer
 

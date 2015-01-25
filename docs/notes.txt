@@ -1,0 +1,42 @@
+Robot Core Communication
+
+Data Model
+ 1. Defined object types (motor, encoder, servo, sonar, etc)
+ 2. Module exposes objects, of certain type (left motor, forward sonar)
+ 3. Object attributes have data type(int, float, boolean, enum, etc) and readonly flag
+ 4. Operations on ojects (update, read) pass attributes to update/read
+
+Process
+ 1. Module registers event types
+ 2. Module registers listeners 
+
+
+Event Type Config
+    1. name
+    2. id
+    3. owner
+    4. exclusive (only owner can send)
+
+
+Interfaces
+    1. Management
+        type: REQ-REP 
+        descr: client send commands to master
+    2. Events
+        type: PUB-SUB (subscribe prefix = object)
+        descr: Event broadcast
+
+
+Management Commands
+    1. Register Self
+    2. Register Event Types
+    3. List Event Types
+    3. Read Event Type
+    4. Lock Event Type (only owner and you can broadcast)
+    5. Unlock Event Type
+
+
+----------------------------------------------------------
+
+
+
