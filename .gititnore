@@ -1,2 +1,3 @@
-**/*.pyc
-**/*.nja
+rcorelib/rcorelib/*.pyc
+rcoremaster/*.pyc
+*.nja
