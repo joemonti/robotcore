@@ -5,6 +5,7 @@ import sys
 import zmq
 import signal
 import threading
+import json
 
 import rcorelib
 import rcorelib.event as revent
@@ -20,9 +21,12 @@ class RCoreManagementIface(object):
         self.master = master
         
         self.sock = ctx.socket(zmq.REP)
+        self.sock.bind("tcp://*:%d" % ( rcorelib.PORT_MGT )) #subscribe to client pub
         
         self.running = False
         self.t = threading.Thread(target=self.run)
+
+        self.nextId = 0
     
     def start(self):
         self.running = True
@@ -37,7 +41,48 @@ class RCoreManagementIface(object):
         self.sock.close()
     
     def run(self):
-        pass
+        while self.running:
+            data = self.sock.recv()
+
+            print 'MGT RCVD: %s' % ( data )
+
+            obj = json.loads(data)
+
+            command = obj["command"]
+            data = obj["data"]
+
+            res = None
+            if command == "register_event_type":
+                res = self.process_register_event_type(data)
+            elif command == "read_event_type":
+                res = self.process_read_event_type(data)
+
+            self.sock.send(json.dumps(res))
+
+
+    def process_register_event_type(self, data):
+        id = self.nextId
+        self.nextId += 1
+
+        eventType = revent.RCoreEventType(data["name"], data["dataTypes"], id)
+
+        self.master.eventTypes[eventType.name] = eventType
+
+        return { "result" : "ack", "data" : {  "id" : id } }
+
+    def process_read_event_type(self, data):
+        if data["name"] in self.master.eventTypes:
+            eventType = self.master.eventTypes[data["name"]]
+            return {
+                "result" : "ack",
+                "data" : {
+                    "id" : eventType.id,
+                    "name" : eventType.name,
+                    "dataTypes" : eventType.dataTypes
+                }
+            }
+        else:
+            return { "result" : "nack", "data" : { "errorKey" : "NOT_FOUND" } }
 
 class RCoreEventIface(object):
     def __init__(self, master, ctx):
@@ -68,12 +113,15 @@ class RCoreEventIface(object):
     
     def run(self):
         #zmq.device(zmq.FORWARDER, sockSub, sockPub)
-        
+        # can't exactly forward b/c we have some validation/logic we need to perform
+        # even though currently we just pass all through
+
         while self.running:
             data = self.sockSub.recv()
             
             # verify type
             # check if locked
+            print 'EV RCVD: %s' % ( data )
             
             self.sockPub.send(data)
 

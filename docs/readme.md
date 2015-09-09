@@ -70,8 +70,59 @@ Command Overview
    3. server forwards to subscribers
 
 
-Commands
+Management Commands
 -------------
 
+Management commands allow clients to interact with the robot core master. 
+Management commands are executed over the management interface (REQ/REP socket)
+and data is transferred via JSON.
 
+COMMAND: Register Event Type
+
+Request:
+    {
+      "command": "register_event_type",
+      "data" : {
+        "name" : <string>,
+        "dataTypes" : <array[int]>
+      }
+    }
+
+Response:
+    {
+      "result" : "ack",
+      "data" : {
+        "id" : <short>
+      }
+    }
+
+COMMAND: Read Event Type
+
+Request:
+    {
+      "command" : "read_event_type",
+      "data" : {
+        "name" : <string>
+      }
+    }
+
+Response: Found
+
+    {
+      "result" : "ack",
+      "data" : {
+        "id" : <short>,
+        "name" : <string>,
+        "dataTypes" : <array[int]>
+      }
+    }
+
+Response: Not Found
+
+    {
+      "result" : "nack",
+      "data" : {
+        "errorKey" : "NOT_FOUND"
+      }
+    }
 

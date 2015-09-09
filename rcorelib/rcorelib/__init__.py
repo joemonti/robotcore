@@ -2,17 +2,13 @@
 
 import zmq
 import threading
+import event
+import struct
+import json
 
 PORT_MGT=12210
 PORT_PUB=12211
 PORT_SUB=12212
-
-MGT_CMD_REGISTER_SELF        = 0
-MGT_CMD_REGISTER_EVENT_TYPE  = 1
-MGT_CMD_REQUEST_EVENT_TYPE   = 2
-MGT_CMD_LOCK_EVENT_TYPE      = 3
-MGT_CMD_UNLOCK_EVENT_TYPE    = 4
-
 
 class RCoreClient(object):
     '''RobotCore Client'''
@@ -29,20 +25,52 @@ class RCoreClient(object):
         self.sockSub.connect("tcp://%s:%d" % ( server, PORT_SUB ))
 
         self.self = None
-        self.types = {}
+        self.typesByName = {}
+        self.typesById = {}
         self.listeners = {}
     
     def get_event_types(self):
         pass # list event types via management interface
     
-    def get_event_type(self, name):
-        pass # read event type via management interface
+    def read_event_type(self, name):
+        if name in self.typesByName:
+            return self.typesByName[name]
+        else:
+            data = { "name" : name }
+            resp = self.call_mgt_command("read_event_type", data)
+            if resp["result"] == "ack":
+                respData = resp["data"]
+                eventType = event.RCoreEventType(respData["name"], respData["dataTypes"], respData["id"])
+                self.typesByName[name] = eventType
+                self.typesById[eventType.id] = eventType
+                return eventType
+            else:
+                return None
 
     def register_event_type(self, eventType):
-        pass # register event type via management interface
+        data = {
+            "name": eventType.name,
+            "dataTypes": eventType.dataTypes
+        }
+
+        resp = self.call_mgt_command("register_event_type", data)
+        if resp["result"] == "ack":
+            respData = resp["data"]
+            eventType.id = respData["id"]
+            self.typesByName[eventType.name] = eventType
+            self.typesById[eventType.id] = eventType
+            return eventType
+        else:
+            raise Exception("Error registering event type %s" % ( eventType.name ))
+
+
+    def call_mgt_command(self, command, data):
+        self.sockMgt.send( json.dumps( { "command": command, "data": data } ) )
+        resp = self.sockMgt.recv()
+        return json.loads( resp )
     
-    def send(self, event):
-        data = event.serialize()
+    def send(self, evt):
+        data = evt.serialize()
         self.sockPub.send(data)
 
     def register_listener(self, eventTypeName, callback):
@@ -52,7 +80,9 @@ class RCoreClient(object):
         else:
             eventListeners = []
             self.listeners[eventTypeName] = eventListeners
-            self.sockSub.setsockopt(zmq.SUBSCRIBE, '%s' % ( eventTypeName ))
+            eventType = self.read_event_type(eventTypeName)
+            self.sockSub.setsockopt(zmq.SUBSCRIBE, struct.pack('>h', eventType.id))
+
         eventListeners.append(callback)
     
     def start(self):
@@ -70,13 +100,16 @@ class RCoreClient(object):
         print 'Started Listener'
         while self.running:
             data = self.sockSub.recv()
+
             print 'Received: %s' % ( data )
-            firstSpace = data.find(' ')
-            eventTypeName = data[0:firstSpace]
-            eventData = data[firstSpace+1:]
-            if eventTypeName in self.listeners:
-                for listener in self.listeners[eventTypeName]:
-                    listener(eventTypeName, eventData)
+
+            eventTypeId = struct.unpack('>h', data[:2])[0]
+            eventType = self.typesById[eventTypeId]
+            evt = event.RCoreEvent(eventType, bytearray(data[2:]))
+
+            if eventType.name in self.listeners:
+                for listener in self.listeners[eventType.name]:
+                    listener(evt)
 
 
 def demo():
