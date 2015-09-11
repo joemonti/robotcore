@@ -1,152 +1,134 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import sys
+# import sys
 import zmq
 import signal
 import threading
-import json
+import traceback
 
 import rcorelib
 import rcorelib.event as revent
 
 
-class RCoreMaster(object):
-    def __init__(self):
-        self.clients = {}
-        self.eventTypes = {}
+MGT_EVENT_RESP = revent.RCoreEventBuilder(revent.EVT_TYPE_MGT_EVENT_RESP) \
+    .build()
 
-class RCoreManagementIface(object):
-    def __init__(self, master, ctx):
-        self.master = master
-        
-        self.sock = ctx.socket(zmq.REP)
-        self.sock.bind("tcp://*:%d" % ( rcorelib.PORT_MGT )) #subscribe to client pub
-        
+
+class RCoreMaster(object):
+    def __init__(self, ctx):
+        self.clients = {}
+        self.eventTypesById = {}
+        self.eventTypesByName = {}
+
+        self.sockMgt = ctx.socket(zmq.REP)
+        self.sockMgt.bind("tcp://*:%d" % (rcorelib.PORT_MGT))
+
+        self.sockPub = ctx.socket(zmq.PUB)
+        self.sockPub.bind("tcp://*:%d" % (rcorelib.PORT_PUB))
+
         self.running = False
         self.t = threading.Thread(target=self.run)
 
-        self.nextId = 0
-    
+        self.nextId = 10   # first 10 reserved for MGT interface
+
     def start(self):
         self.running = True
         self.t.start()
-    
+
     def join(self):
         if self.running:
             self.t.join()
-    
+
     def stop(self):
         self.running = False
-        self.sock.close()
-    
+        self.sockMgt.close()
+        self.sockPub.close()
+
     def run(self):
-        while self.running:
-            data = self.sock.recv()
+        try:
+            while self.running:
+                data = self.sockMgt.recv()
 
-            print 'MGT RCVD: %s' % ( data )
+                print 'MGT RCVD: %s' % (data)
 
-            obj = json.loads(data)
+                evt = revent.RCoreEvent \
+                    .from_data(data,
+                               lambda id: self.eventTypesById[id])
+                res = None
+                if evt.eventType.name == "register_event_type":
+                    res = self.process_register_event_type(evt)
+                elif evt.eventType.name == "read_event_type":
+                    res = self.process_read_event_type(evt)
+                else:
+                    res = self.process_event(evt, data)
 
-            command = obj["command"]
-            data = obj["data"]
+                self.sockMgt.send(res)
+        except:
+            print 'Error in MGT Thread'
+            traceback.print_exc()
+            self.running = False
 
-            res = None
-            if command == "register_event_type":
-                res = self.process_register_event_type(data)
-            elif command == "read_event_type":
-                res = self.process_read_event_type(data)
-
-            self.sock.send(json.dumps(res))
-
-
-    def process_register_event_type(self, data):
+    def process_register_event_type(self, evt):
         id = self.nextId
         self.nextId += 1
 
-        eventType = revent.RCoreEventType(data["name"], data["dataTypes"], id)
+        reader = evt.reader()
+        name = reader.read()
+        dataTypes = [i for i in reader.read()]  # turns bytearray into int arra
+        eventType = revent.RCoreEventType(name, dataTypes, id)
 
-        self.master.eventTypes[eventType.name] = eventType
+        self.eventTypesByName[eventType.name] = eventType
+        self.eventTypesById[eventType.id] = eventType
 
-        return { "result" : "ack", "data" : {  "id" : id } }
+        return revent.RCoreEventBuilder(
+            revent.EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP).add(id).build()
 
-    def process_read_event_type(self, data):
-        if data["name"] in self.master.eventTypes:
-            eventType = self.master.eventTypes[data["name"]]
-            return {
-                "result" : "ack",
-                "data" : {
-                    "id" : eventType.id,
-                    "name" : eventType.name,
-                    "dataTypes" : eventType.dataTypes
-                }
-            }
+    def process_read_event_type(self, evt):
+        reader = evt.reader()
+        name = reader.read()
+
+        if name in self.master.eventTypes:
+            eventType = self.master.eventTypes[name]
+            return revent.RCoreEventBuilder(
+                revent.EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP) \
+                .add(eventType.id) \
+                .add(eventType.name) \
+                .add(bytearray(eventType.dataTypes)) \
+                .build()
         else:
-            return { "result" : "nack", "data" : { "errorKey" : "NOT_FOUND" } }
+            return revent.RCoreEventBuilder(
+                revent.EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP) \
+                .add(-1) \
+                .add('NOT_FOUND') \
+                .add(bytearray('')) \
+                .build()
 
-class RCoreEventIface(object):
-    def __init__(self, master, ctx):
-        self.master = master
-        
-        self.sockSub = ctx.socket(zmq.SUB)
-        self.sockSub.bind("tcp://*:%d" % ( rcorelib.PORT_PUB )) #subscribe to client pub
-        self.sockSub.setsockopt(zmq.SUBSCRIBE, b'')
+    def process_event(self, evt, data):
+        # TODO: INSPECT EVENT, VERIFY NOT LOCKED, ETC
 
-        self.sockPub = ctx.socket(zmq.PUB)
-        self.sockPub.bind("tcp://*:%d" % ( rcorelib.PORT_SUB )) #publish to client sub
-        
-        self.running = False
-        self.t = threading.Thread(target=self.run)
-    
-    def start(self):
-        self.running = True
-        self.t.start()
-    
-    def join(self):
-        if self.running:
-            self.t.join()
-    
-    def stop(self):
-        self.running = False
-        self.sockSub.close()
-        self.sockPub.close()
-    
-    def run(self):
-        #zmq.device(zmq.FORWARDER, sockSub, sockPub)
-        # can't exactly forward b/c we have some validation/logic we need to perform
-        # even though currently we just pass all through
+        self.sockPub.send(data)
 
-        while self.running:
-            data = self.sockSub.recv()
-            
-            # verify type
-            # check if locked
-            print 'EV RCVD: %s' % ( data )
-            
-            self.sockPub.send(data)
+        return MGT_EVENT_RESP
 
 
 class RCoreMain(object):
     def __init__(self):
         ctx = zmq.Context()
-        
-        self.master = RCoreMaster()
-        self.mgtIface = RCoreManagementIface(self.master, ctx)
-        self.eventIface = RCoreEventIface(self.master, ctx)
-        
+
+        self.master = RCoreMaster(ctx)
+
     def run(self):
-        self.mgtIface.start()
-        self.eventIface.start()
-        
+        self.master.start()
+
         signal.signal(signal.SIGINT, self.shutdown)
-        
-        self.mgtIface.join()
-        self.eventIface.join()
-        
+
+        self.master.join()
+
     def shutdown(self):
         print 'Shutdown received'
-        self.mgtIface.stop()
-        self.eventIface.stop()
+        self.master.stop()
+
 
 def main():
     rcoreMain = RCoreMain()
