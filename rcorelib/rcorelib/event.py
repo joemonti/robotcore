@@ -2,6 +2,7 @@
 
 import struct
 import json
+import traceback
 
 MSG_DATA_TYPE_BYTE = 0
 MSG_DATA_TYPE_INT = 1
@@ -109,11 +110,15 @@ class RCoreEventBuilder(object):
         dtype = self.eventType.dataTypes[self.index]
 
         if dtype in MSG_DATA_TYPES_VARS:
-            if dtype == MSG_DATA_TYPE_JSON and \
-                        type(value) not in [str, unicode, bytearray]:
+            if dtype == MSG_DATA_TYPE_STRING and type(value) != str:
+                value = str(value)
+            elif dtype == MSG_DATA_TYPE_JSON and \
+                    type(value) not in [str, unicode, bytearray]:
                 value = json.dumps(value)
+
             if (self.index+1) < self.eventType.count:
                 self.buffer.extend(struct.pack('>i', len(value)))
+
             self.buffer.extend(value)
         else:
             fmt = '>%s' % (MSG_DATA_TYPE_STRUCT[dtype]['fmt'])
@@ -133,11 +138,16 @@ class RCoreEvent(object):
         self.eventType = eventType
         self.data = data
         self.index = 0
+        self.serialized = None
 
     def serialize(self):
-        buffer = bytearray(struct.pack('>h', self.eventType.id))
-        buffer.extend(self.data)
-        return buffer
+        if self.serialized is None:
+            buffer = bytearray(struct.pack('>h', self.eventType.id))
+            buffer.extend(self.data)
+            self.serialized = buffer
+            return buffer
+        else:
+            return self.serialized
 
     def reader(self):
         return RCoreEventReader(self)
@@ -227,8 +237,13 @@ EVT_TYPE_MGT_EVENT_RESP = \
     RCoreEventTypeBuilder('event_response') \
     .build()
 
-EVT_TYPE_MGT_REGISTER_EVENT_TYPE.id = 1
-EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP.id = 2
-EVT_TYPE_MGT_READ_EVENT_TYPE.id = 3
-EVT_TYPE_MGT_READ_EVENT_TYPE_RESP.id = 4
-EVT_TYPE_MGT_EVENT_RESP.id = 5
+EVT_TYPE_MGT_TYPES = [
+    EVT_TYPE_MGT_REGISTER_EVENT_TYPE,
+    EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP,
+    EVT_TYPE_MGT_READ_EVENT_TYPE,
+    EVT_TYPE_MGT_READ_EVENT_TYPE_RESP,
+    EVT_TYPE_MGT_EVENT_RESP
+]
+
+for i in range(len(EVT_TYPE_MGT_TYPES)):
+    EVT_TYPE_MGT_TYPES[i].id = (i+1)

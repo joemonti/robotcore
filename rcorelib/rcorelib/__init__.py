@@ -7,8 +7,7 @@ import struct
 import json
 
 PORT_MGT = 12210
-PORT_PUB = 12211
-PORT_SUB = 12212
+PORT_PUBSUB = 12211
 
 
 class RCoreClient(object):
@@ -19,15 +18,16 @@ class RCoreClient(object):
         self.sockMgt = self.ctx.socket(zmq.REQ)
         self.sockMgt.connect("tcp://%s:%d" % (server, PORT_MGT))
 
-        self.sockPub = self.ctx.socket(zmq.PUB)
-        self.sockPub.connect("tcp://%s:%d" % (server, PORT_PUB))
-
         self.sockSub = self.ctx.socket(zmq.SUB)
-        self.sockSub.connect("tcp://%s:%d" % (server, PORT_SUB))
+        self.sockSub.connect("tcp://%s:%d" % (server, PORT_PUBSUB))
 
-        self.self = None
         self.typesByName = {}
         self.typesById = {}
+
+        for eventType in event.EVT_TYPE_MGT_TYPES:
+            self.typesByName[eventType.name] = eventType
+            self.typesById[eventType.id] = eventType
+
         self.listeners = {}
 
     def get_event_types(self):
@@ -37,44 +37,54 @@ class RCoreClient(object):
         if name in self.typesByName:
             return self.typesByName[name]
         else:
-            data = {"name": name}
-            resp = self.call_mgt_command("read_event_type", data)
-            if resp["result"] == "ack":
-                respData = resp["data"]
-                eventType = event.RCoreEventType(respData["name"],
-                                                 respData["dataTypes"],
-                                                 respData["id"])
+            evt = event.RCoreEventBuilder(event.EVT_TYPE_MGT_READ_EVENT_TYPE) \
+                    .add(name).build()
+            respevt = self.call_mgt_command(evt)
+
+            respreader = respevt.reader()
+            respid = respreader.read()
+            respname = respreader.read()
+            respDataTypes = [i for i in respreader.read()]
+
+            if respid >= 0:
+                eventType = event.RCoreEventType(respname,
+                                                 respDataTypes,
+                                                 id=respid)
                 self.typesByName[name] = eventType
-                self.typesById[eventType.id] = eventType
+                self.typesById[respid] = eventType
                 return eventType
             else:
                 return None
 
     def register_event_type(self, eventType):
-        data = {
-            "name": eventType.name,
-            "dataTypes": eventType.dataTypes
-        }
+        evt = event.RCoreEventBuilder(event.EVT_TYPE_MGT_REGISTER_EVENT_TYPE) \
+                    .add(eventType.name).add(eventType.dataTypes).build()
 
-        resp = self.call_mgt_command("register_event_type", data)
-        if resp["result"] == "ack":
-            respData = resp["data"]
-            eventType.id = respData["id"]
+        respevt = self.call_mgt_command(evt)
+
+        respreader = respevt.reader()
+        respid = respreader.read()
+        if respid >= 0:
+            eventType.id = respid
             self.typesByName[eventType.name] = eventType
-            self.typesById[eventType.id] = eventType
+            self.typesById[respid] = eventType
             return eventType
         else:
             raise Exception("Error registering event type %s" %
                             (eventType.name))
 
-    def call_mgt_command(self, command, data):
-        self.sockMgt.send(json.dumps({"command": command, "data": data}))
+    def call_mgt_command(self, evt):
+        data = evt.serialize()
+        self.sockMgt.send(data)
         resp = self.sockMgt.recv()
-        return json.loads(resp)
+        respevt = event.RCoreEvent.from_data(resp,
+                                             lambda id: self.typesById[id])
+        return respevt
 
     def send(self, evt):
         data = evt.serialize()
-        self.sockPub.send(data)
+        self.sockMgt.send(data)
+        self.sockMgt.recv()  # ignore response, but must receive on pub-sub
 
     def register_listener(self, eventTypeName, callback):
         eventListeners = None

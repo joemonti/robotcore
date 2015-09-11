@@ -18,14 +18,18 @@ MGT_EVENT_RESP = revent.RCoreEventBuilder(revent.EVT_TYPE_MGT_EVENT_RESP) \
 class RCoreMaster(object):
     def __init__(self, ctx):
         self.clients = {}
-        self.eventTypesById = {}
-        self.eventTypesByName = {}
+        self.typesById = {}
+        self.typesByName = {}
+
+        for eventType in revent.EVT_TYPE_MGT_TYPES:
+            self.typesByName[eventType.name] = eventType
+            self.typesById[eventType.id] = eventType
 
         self.sockMgt = ctx.socket(zmq.REP)
         self.sockMgt.bind("tcp://*:%d" % (rcorelib.PORT_MGT))
 
         self.sockPub = ctx.socket(zmq.PUB)
-        self.sockPub.bind("tcp://*:%d" % (rcorelib.PORT_PUB))
+        self.sockPub.bind("tcp://*:%d" % (rcorelib.PORT_PUBSUB))
 
         self.running = False
         self.t = threading.Thread(target=self.run)
@@ -54,7 +58,7 @@ class RCoreMaster(object):
 
                 evt = revent.RCoreEvent \
                     .from_data(data,
-                               lambda id: self.eventTypesById[id])
+                               lambda id: self.typesById[id])
                 res = None
                 if evt.eventType.name == "register_event_type":
                     res = self.process_register_event_type(evt)
@@ -63,7 +67,7 @@ class RCoreMaster(object):
                 else:
                     res = self.process_event(evt, data)
 
-                self.sockMgt.send(res)
+                self.sockMgt.send(res.serialize())
         except:
             print 'Error in MGT Thread'
             traceback.print_exc()
@@ -78,8 +82,10 @@ class RCoreMaster(object):
         dataTypes = [i for i in reader.read()]  # turns bytearray into int arra
         eventType = revent.RCoreEventType(name, dataTypes, id)
 
-        self.eventTypesByName[eventType.name] = eventType
-        self.eventTypesById[eventType.id] = eventType
+        self.typesByName[eventType.name] = eventType
+        self.typesById[eventType.id] = eventType
+
+        print 'Registered event type %s [%d]' % (eventType.name, eventType.id)
 
         return revent.RCoreEventBuilder(
             revent.EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP).add(id).build()
@@ -88,20 +94,20 @@ class RCoreMaster(object):
         reader = evt.reader()
         name = reader.read()
 
-        if name in self.master.eventTypes:
-            eventType = self.master.eventTypes[name]
+        if name in self.typesByName:
+            eventType = self.typesByName[name]
             return revent.RCoreEventBuilder(
-                revent.EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP) \
+                revent.EVT_TYPE_MGT_READ_EVENT_TYPE_RESP) \
                 .add(eventType.id) \
                 .add(eventType.name) \
                 .add(bytearray(eventType.dataTypes)) \
                 .build()
         else:
             return revent.RCoreEventBuilder(
-                revent.EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP) \
+                revent.EVT_TYPE_MGT_READ_EVENT_TYPE_RESP) \
                 .add(-1) \
                 .add('NOT_FOUND') \
-                .add(bytearray('')) \
+                .add(bytearray([])) \
                 .build()
 
     def process_event(self, evt, data):
