@@ -107,7 +107,6 @@ class RCoreClient(object):
     def close(self):
         self.running = False
         self.sockMgt.close()
-        self.sockPub.close()
         self.sockSub.close()
 
     def run_listeners(self):
