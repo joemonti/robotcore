@@ -6,8 +6,8 @@ components. Written in Python using ZeroMQ.
 
 This provides two python packages:
 
-    1. rcoremaster: A master daemon for clients to connect to, providing component management and message routing.
-    2. rcorelib: A Python client library for robotcore clients.
+1. rcoremaster: A master daemon for clients to connect to, providing component management and message routing.
+2. rcorelib: A Python client library for robotcore clients.
 
 
 Important
