@@ -31,4 +31,4 @@ setup(name='rcorelib',
       author_email='joe.monti@gmail.com',
       url='http://www.joemonti.org/',
       license='GNU GPL v3',
-      py_modules=[])
+      packages=['rcorelib'])
