@@ -30,7 +30,7 @@ import traceback
 
 import rcorelib
 import rcorelib.event as revent
-
+import time
 
 MGT_EVENT_RESP = revent.RCoreEventBuilder(revent.EVT_TYPE_MGT_EVENT_RESP) \
     .build()
@@ -61,14 +61,16 @@ class RCoreMaster(object):
         self.running = True
         self.t.start()
 
-    def join(self):
-        if self.running:
-            self.t.join()
+    def isAlive(self):
+        if self.t is not None:
+            return self.t.isAlive()
+        return False
 
     def stop(self):
         self.running = False
         self.sockMgt.close()
         self.sockPub.close()
+        self.t = None
 
     def run(self):
         try:
@@ -141,20 +143,25 @@ class RCoreMaster(object):
 
 class RCoreMain(object):
     def __init__(self):
-        ctx = zmq.Context()
+        self.ctx = zmq.Context()
 
-        self.master = RCoreMaster(ctx)
+        self.master = RCoreMaster(self.ctx)
 
     def run(self):
         self.master.start()
 
-        signal.signal(signal.SIGINT, self.shutdown)
-
-        self.master.join()
-
-    def shutdown(self):
-        print 'Shutdown received'
-        self.master.stop()
+        running = True
+        while running:
+            try:
+                if self.master.isAlive():
+                    time.sleep(1.0)
+                else:
+                    running = False
+            except KeyboardInterrupt:
+                print 'Interrupted'
+                self.master.stop()
+                self.ctx.term()
+                time.sleep(1)
 
 
 def main():

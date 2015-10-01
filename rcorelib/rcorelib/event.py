@@ -150,6 +150,83 @@ class RCoreEventBuilder(object):
 
         return self
 
+    def add_byte(self, value):
+        if self.index >= self.eventType.count:
+            raise Exception("Can't add to event, already %d items" %
+                            (self.eventType.count))
+        self.buffer.extend(struct.pack('>B', value))
+        self.index += 1
+        return self
+
+    def add_int(self, value):
+        if self.index >= self.eventType.count:
+            raise Exception("Can't add to event, already %d items" %
+                            (self.eventType.count))
+        self.buffer.extend(struct.pack('>i', value))
+        self.index += 1
+        return self
+
+    def add_long(self, value):
+        if self.index >= self.eventType.count:
+            raise Exception("Can't add to event, already %d items" %
+                            (self.eventType.count))
+        self.buffer.extend(struct.pack('>l', value))
+        self.index += 1
+        return self
+
+    def add_float(self, value):
+        if self.index >= self.eventType.count:
+            raise Exception("Can't add to event, already %d items" %
+                            (self.eventType.count))
+        self.buffer.extend(struct.pack('>f', value))
+        self.index += 1
+        return self
+
+    def add_double(self, value):
+        if self.index >= self.eventType.count:
+            raise Exception("Can't add to event, already %d items" %
+                            (self.eventType.count))
+        self.buffer.extend(struct.pack('>d', value))
+        self.index += 1
+        return self
+
+    def add_string(self, value):
+        if self.index >= self.eventType.count:
+            raise Exception("Can't add to event, already %d items" %
+                            (self.eventType.count))
+        if type(value) != str:
+            value = str(value)
+        if (self.index+1) < self.eventType.count:
+            self.buffer.extend(struct.pack('>i', len(value)))
+
+        self.buffer.extend(value)
+        self.index += 1
+        return self
+
+    def add_bytea(self, value):
+        if self.index >= self.eventType.count:
+            raise Exception("Can't add to event, already %d items" %
+                            (self.eventType.count))
+        if (self.index+1) < self.eventType.count:
+            self.buffer.extend(struct.pack('>i', len(value)))
+
+        self.buffer.extend(value)
+        self.index += 1
+        return self
+
+    def add_json(self, value):
+        if self.index >= self.eventType.count:
+            raise Exception("Can't add to event, already %d items" %
+                            (self.eventType.count))
+        if type(value) not in [str, unicode, bytearray]:
+            value = json.dumps(value)
+        if (self.index+1) < self.eventType.count:
+            self.buffer.extend(struct.pack('>i', len(value)))
+
+        self.buffer.extend(value)
+        self.index += 1
+        return self
+
     def build(self):
         return RCoreEvent(self.eventType, self.buffer)
 

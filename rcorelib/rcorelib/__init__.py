@@ -23,6 +23,7 @@ along with RobotCore.  If not, see <http://www.gnu.org/licenses/>.
 
 import zmq
 import threading
+import traceback
 import event
 import struct
 # import json
@@ -33,8 +34,12 @@ PORT_PUBSUB = 12211
 
 class RCoreClient(object):
     '''RobotCore Client'''
-    def __init__(self, server, name):
-        self.ctx = zmq.Context()
+    def __init__(self, server, name, ctx=None):
+        self.ctx = ctx
+        self.termContext = False
+        if self.ctx is None:
+            self.ctx = zmq.Context()
+            self.termContext = True
 
         self.sockMgt = self.ctx.socket(zmq.REQ)
         self.sockMgt.connect("tcp://%s:%d" % (server, PORT_MGT))
@@ -129,20 +134,26 @@ class RCoreClient(object):
         self.running = False
         self.sockMgt.close()
         self.sockSub.close()
+        if self.termContext:
+            self.ctx.term()
 
     def run_listeners(self):
         print 'Started Listener'
-        while self.running:
-            data = self.sockSub.recv()
+        try:
+            while self.running:
+                data = self.sockSub.recv()
 
-            print 'Received: %s' % (data)
+                print 'Received: %s' % (data)
 
-            evt = event.RCoreEvent.from_data(data,
-                                             lambda id: self.typesById[id])
+                evt = event.RCoreEvent.from_data(data,
+                                                 lambda id: self.typesById[id])
 
-            if evt.eventType.name in self.listeners:
-                for listener in self.listeners[evt.eventType.name]:
-                    listener(evt)
+                if evt.eventType.name in self.listeners:
+                    for listener in self.listeners[evt.eventType.name]:
+                        listener(evt)
+        except:
+            traceback.print_exc()
+            self.close()
 
 
 def demo():
