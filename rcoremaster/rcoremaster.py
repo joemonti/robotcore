@@ -81,12 +81,12 @@ class RCoreMaster(object):
             while self.running:
                 data = self.sock_mgt.recv()
 
+                print 'MGT RCVD: %s' % (":".join("{:02x}".format(ord(c)) for c in data))
+
                 evt = revent.RCoreEvent \
                     .from_data(data,
                                lambda id: self.types_by_id[id])
                 
-                print 'RCVD EVENT %s' % (evt.eventType.name)
-
                 res = None
 
                 if evt.eventType.name == "register_event_type":
@@ -118,12 +118,16 @@ class RCoreMaster(object):
             event_type_id = self.nextId
             self.nextId += 1
 
+<<<<<<< HEAD
             event_type = revent.RCoreEventType(name, data_types, event_type_id)
 
             self.types_by_name[event_type.name] = event_type
             self.types_by_id[event_type.id] = event_type
 
             print 'Registered new event type %s [%d]' % (event_type.name, event_type.id)
+=======
+        print 'Registered event type %s [id=%d] [types=%s]' % (eventType.name, eventType.id, '|'.join([str(t) for t in dataTypes]))
+>>>>>>> ca5a0be9ebfd655334b727260cdbdff8c1181a5e
 
         return revent.RCoreEventBuilder(
             revent.EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP).add(event_type_id).build()
