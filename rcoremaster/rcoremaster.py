@@ -23,34 +23,34 @@ along with RobotCore.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 # import sys
-import zmq
-import signal
 import threading
 import traceback
+import time
+
+import zmq
 
 import rcorelib
 import rcorelib.event as revent
-import time
 
 MGT_EVENT_RESP = revent.RCoreEventBuilder(revent.EVT_TYPE_MGT_EVENT_RESP) \
     .build()
 
-
 class RCoreMaster(object):
+    '''Master RobotCore daemon'''
     def __init__(self, ctx):
         self.clients = {}
-        self.typesById = {}
-        self.typesByName = {}
+        self.types_by_id = {}
+        self.types_by_name = {}
 
-        for eventType in revent.EVT_TYPE_MGT_TYPES:
-            self.typesByName[eventType.name] = eventType
-            self.typesById[eventType.id] = eventType
+        for event_type in revent.EVT_TYPE_MGT_TYPES:
+            self.types_by_name[event_type.name] = event_type
+            self.types_by_id[event_type.id] = event_type
 
-        self.sockMgt = ctx.socket(zmq.REP)
-        self.sockMgt.bind("tcp://*:%d" % (rcorelib.PORT_MGT))
+        self.sock_mgt = ctx.socket(zmq.REP)
+        self.sock_mgt.bind("tcp://*:%d" % (rcorelib.PORT_MGT))
 
-        self.sockPub = ctx.socket(zmq.PUB)
-        self.sockPub.bind("tcp://*:%d" % (rcorelib.PORT_PUBSUB))
+        self.sock_pub = ctx.socket(zmq.PUB)
+        self.sock_pub.bind("tcp://*:%d" % (rcorelib.PORT_PUBSUB))
 
         self.running = False
         self.t = threading.Thread(target=self.run)
@@ -58,31 +58,37 @@ class RCoreMaster(object):
         self.nextId = 10   # first 10 reserved for MGT interface
 
     def start(self):
+        '''start running master daemon'''
         self.running = True
         self.t.start()
 
     def isAlive(self):
+        '''return true if master daemon is alive'''
         if self.t is not None:
             return self.t.isAlive()
         return False
 
     def stop(self):
+        '''stop running thread'''
         self.running = False
-        self.sockMgt.close()
-        self.sockPub.close()
+        self.sock_mgt.close()
+        self.sock_pub.close()
         self.t = None
 
     def run(self):
+        '''Thread entrypoint'''
         try:
             while self.running:
-                data = self.sockMgt.recv()
-
-                print 'MGT RCVD: %s' % (data)
+                data = self.sock_mgt.recv()
 
                 evt = revent.RCoreEvent \
                     .from_data(data,
-                               lambda id: self.typesById[id])
+                               lambda id: self.types_by_id[id])
+                
+                print 'RCVD EVENT %s' % (evt.eventType.name)
+
                 res = None
+
                 if evt.eventType.name == "register_event_type":
                     res = self.process_register_event_type(evt)
                 elif evt.eventType.name == "read_event_type":
@@ -90,35 +96,57 @@ class RCoreMaster(object):
                 else:
                     res = self.process_event(evt, data)
 
-                self.sockMgt.send(res.serialize())
+                self.sock_mgt.send(res.serialize())
         except:
             print 'Error in MGT Thread'
             traceback.print_exc()
             self.running = False
 
     def process_register_event_type(self, evt):
-        id = self.nextId
-        self.nextId += 1
-
+        '''process the registering of event type'''
         reader = evt.reader()
         name = reader.read()
-        dataTypes = [i for i in reader.read()]  # turns bytearray into int arra
-        eventType = revent.RCoreEventType(name, dataTypes, id)
+        data_types = [i for i in reader.read()]  # turns bytearray into int arra
 
-        self.typesByName[eventType.name] = eventType
-        self.typesById[eventType.id] = eventType
+        event_type_id = None
 
-        print 'Registered event type %s [%d]' % (eventType.name, eventType.id)
+        if self.event_type_exists(name, data_types):
+            event_type = self.types_by_name[name]
+            event_type_id = event_type.id
+            print 'Registered existing event type %s [%d]' % (event_type.name, event_type.id)
+        else:
+            event_type_id = self.nextId
+            self.nextId += 1
+
+            event_type = revent.RCoreEventType(name, data_types, event_type_id)
+
+            self.types_by_name[event_type.name] = event_type
+            self.types_by_id[event_type.id] = event_type
+
+            print 'Registered new event type %s [%d]' % (event_type.name, event_type.id)
 
         return revent.RCoreEventBuilder(
-            revent.EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP).add(id).build()
+            revent.EVT_TYPE_MGT_REGISTER_EVENT_TYPE_RESP).add(event_type_id).build()
+
+    def event_type_exists(self, name, data_types):
+        return name in self.types_by_name and \
+            self.event_data_types_match(self.types_by_name[name], data_types)
+
+    def event_data_types_match(self, event_type, data_types):
+        if len(event_type.dataTypes) == len(data_types):
+            all_equal = True
+            for i in range(len(data_types)):
+                if event_type.dataTypes[i] != data_types[i]:
+                    all_equal = False
+            return all_equal
+        return False
 
     def process_read_event_type(self, evt):
         reader = evt.reader()
         name = reader.read()
 
-        if name in self.typesByName:
-            eventType = self.typesByName[name]
+        if name in self.types_by_name:
+            eventType = self.types_by_name[name]
             return revent.RCoreEventBuilder(
                 revent.EVT_TYPE_MGT_READ_EVENT_TYPE_RESP) \
                 .add(eventType.id) \
@@ -136,7 +164,7 @@ class RCoreMaster(object):
     def process_event(self, evt, data):
         # TODO: INSPECT EVENT, VERIFY NOT LOCKED, ETC
 
-        self.sockPub.send(data)
+        self.sock_pub.send(data)
 
         return MGT_EVENT_RESP
 
